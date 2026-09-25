@@ -1,0 +1,37 @@
+name: Pending major updates
+description: >-
+  Rewrites the single "Pending major updates" issue (label `majors`) with every direct
+  dependency whose latest release is a new major, the packages dependabot.yml holds back,
+  and the runtimes (Node, Python, base images) against their end of support. The issue is
+  edited in place, which sends no notification. Run it after installing the project.
+
+inputs:
+  pnpm-dirs:
+    description: Space-separated directories with a pnpm lockfile.
+    default: "."
+  pip-project:
+    description: Directory whose pyproject.toml lists the Python pins; the project must already be installed in the active interpreter. Empty to skip.
+    default: ""
+  held:
+    description: Space-separated package globs that dependabot.yml ignores entirely.
+    default: ""
+  runtime-root:
+    description: Directory with .nvmrc, .python-version and the Dockerfile.
+    default: "."
+  token:
+    description: Token allowed to write issues in this repository.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Rewrite the "Pending major updates" issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        PNPM_DIRS: ${{ inputs.pnpm-dirs }}
+        PIP_PROJECT: ${{ inputs.pip-project }}
+        HELD: ${{ inputs.held }}
+        RUNTIME_ROOT: ${{ inputs.runtime-root }}
+      run: bash "$GITHUB_ACTION_PATH/majors-report.sh"

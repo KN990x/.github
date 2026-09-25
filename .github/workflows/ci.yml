@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never on a push: that run is the only one a commit on main ever gets.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same check every repository runs, taken from this tree: a change here is
+      # validated by its own action before any repository pins it.
+      - name: Validate workflows and Dependabot config
+        uses: ./actions/validate-config
+
+      - name: Validate the composite actions
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "check-jsonschema==0.38.0"
+          "$RUNNER_TEMP/venv/bin/check-jsonschema" \
+            --schemafile https://json.schemastore.org/github-action.json actions/*/action.yml
+
+      - name: shellcheck the scripts
+        run: shellcheck actions/*/*.sh
