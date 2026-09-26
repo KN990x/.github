@@ -81,10 +81,18 @@ jobs:
           set -euo pipefail
           bash actions/majors-report/majors-report.sh > "$RUNNER_TEMP/report.md"
           cat "$RUNNER_TEMP/report.md"
-          grep -q '^| `is-number` | 6.0.0 |' "$RUNNER_TEMP/report.md"
-          sed -n '/## Held back/,$p' "$RUNNER_TEMP/report.md" | grep -q '^| `is-odd` | 2.0.0 |'
-          ! sed -n '/## New majors/,/## Held back/p' "$RUNNER_TEMP/report.md" | grep -q '`is-odd`'
-          grep -q '^| node | .nvmrc | 22 | \*\*' "$RUNNER_TEMP/report.md"
+          python3 - "$RUNNER_TEMP/report.md" <<'PY'
+          import sys
+          report = open(sys.argv[1]).read()
+          majors = report.split("## New majors available")[1].split("## Held back")[0]
+          held = report.split("## Held back")[1].split("## Runtimes")[0]
+          runtimes = report.split("## Runtimes")[1]
+          assert "| `is-number` | 6.0.0 |" in majors, "is-number missing from the new majors"
+          assert "`is-odd`" not in majors, "a held package leaked into the new majors"
+          assert "| `is-odd` | 2.0.0 |" in held, "is-odd missing from the held section"
+          assert "| node | .nvmrc | 22 | **" in runtimes, "Node 22 not flagged as behind"
+          print("All four sections of the report behave.")
+          PY
 
   publish-fixture:
     name: Release pipeline on a tiny image
