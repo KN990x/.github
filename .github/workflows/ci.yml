@@ -88,9 +88,11 @@ jobs:
 
   publish-fixture:
     name: Release pipeline on a tiny image
+    # A called workflow may not ask for more than its caller grants, even for jobs that end
+    # up skipped: these are what the pipeline declares. Nothing is pushed or attached here.
     permissions:
-      contents: read
-      packages: write # requested by the pipeline; nothing is pushed here
+      contents: write
+      packages: write
       actions: read
     uses: ./.github/workflows/ghcr-publish.yml
     with:
@@ -105,7 +107,8 @@ jobs:
   release:
     name: Tag the next release
     needs: [ci, majors-fixture, publish-fixture]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # A push, or the run dispatched after an automatic Dependabot merge.
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

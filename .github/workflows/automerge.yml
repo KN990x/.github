@@ -1,0 +1,20 @@
+# This repository's own Dependabot PRs (actions, the actionlint image, check-jsonschema)
+# merge themselves like everyone else's, through the workflow they will all use.
+name: Dependabot automerge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: ["dependabot/**"]
+
+permissions: {}
+
+jobs:
+  merge:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPENDABOT_AUTOMERGE != 'off' }}
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    uses: ./.github/workflows/dependabot-merge.yml
