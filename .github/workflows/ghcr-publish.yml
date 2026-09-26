@@ -45,6 +45,14 @@ on:
         description: Workflow file whose successful run on the released commit is required.
         type: string
         default: ci.yml
+      require-ci:
+        description: Require that successful CI run. Only this repository's own test of the pipeline turns it off.
+        type: boolean
+        default: true
+      context:
+        description: Build context (the directory holding the Dockerfile).
+        type: string
+        default: "."
 
 permissions: {}
 
@@ -95,6 +103,7 @@ jobs:
           echo "Version ${version} matches the release tag."
 
       - name: Verify CI passed on this commit
+        if: ${{ inputs.require-ci }}
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
@@ -116,8 +125,8 @@ jobs:
       - name: Build amd64 image for testing
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ inputs.context }}
+          file: ${{ inputs.context }}/Dockerfile
           platforms: linux/amd64
           tags: release-smoke:amd64
           load: true
@@ -130,8 +139,8 @@ jobs:
       - name: Build arm64 image for testing
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ inputs.context }}
+          file: ${{ inputs.context }}/Dockerfile
           platforms: linux/arm64
           tags: release-smoke:arm64
           load: true
@@ -179,8 +188,8 @@ jobs:
         if: ${{ inputs.push }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ inputs.context }}
+          file: ${{ inputs.context }}/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}

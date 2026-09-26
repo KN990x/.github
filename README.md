@@ -1,44 +1,56 @@
 # KN990x shared workflows
 
 The CI, dependency and release pieces that every public KN990x repository uses, kept in one
-place so they cannot drift apart.
+place so they cannot drift apart — and tested here, against fixtures, before any repository
+picks up a new version.
 
 | Piece | Kind | Used for |
 | --- | --- | --- |
-| [`actions/validate-config`](actions/validate-config/action.yml) | Composite action | First step of every `ci.yml`: actionlint on the workflows and the schema check of `dependabot.yml` (an invalid one disables Dependabot silently). |
-| [`actions/majors-report`](actions/majors-report/action.yml) | Composite action | The monthly `Security audit` workflow: rewrites the single "Pending major updates" issue with new majors, held-back packages and runtimes near end of support. |
-| [`.github/workflows/ghcr-publish.yml`](.github/workflows/ghcr-publish.yml) | Reusable workflow | Release → GHCR: tag/version check, CI-passed check, amd64 + arm64 smoke tests, multi-arch push with provenance and SBOM, release assets. `push: false` is the monthly dry run. |
+| [`actions/validate-config`](actions/validate-config/action.yml) | Composite action | First step of every `ci.yml`: actionlint (with shellcheck) on the workflows and the schema check of `dependabot.yml` — an invalid one disables Dependabot silently. |
+| [`actions/majors-report`](actions/majors-report/action.yml) | Composite action | The monthly `Security audit`: rewrites the single "Pending major updates" issue with new majors, held-back packages, and runtimes against their end of support. |
+| [`ghcr-publish.yml`](.github/workflows/ghcr-publish.yml) | Reusable workflow | Release → GHCR: tag/version check, CI-passed check, amd64 + arm64 smoke tests, multi-arch push with provenance and SBOM, release assets. `push: false` is the monthly dry run. |
+| [`dependabot-merge.yml`](.github/workflows/dependabot-merge.yml) | Reusable workflow | Merges a Dependabot PR after its CI passes, only if it is routine (no major, dependency files only, nothing pushed on top), then re-runs CI on `main`. |
+| [`fleet-check.yml`](.github/workflows/fleet-check.yml) | Scheduled here | Monthly "Fleet status" issue in this repository: CI, audit, release dry run, shared pin, Dependabot PRs and disabled workflows for every public repository. |
+
+## How a change reaches the repositories
+
+1. Change it here. [CI](.github/workflows/ci.yml) validates the config, runs the majors
+   report on a deliberately stale project ([`test/majors`](test/majors)) and the whole release
+   pipeline on a tiny image in both architectures ([`test/fixture`](test/fixture)).
+2. Green on `main` tags the next release by itself: a patch, or put `#minor` / `#major` in
+   a commit message (a major is for a breaking input change).
+3. Each repository pins a release by SHA (`@<sha> # vX.Y.Z`). Its monthly Dependabot
+   `actions` PR moves the pin — without the usual 7-day cooldown, which exists for third
+   parties — its CI tests the new version, and `dependabot-merge` merges it.
+
+The tool versions used here (the actionlint image, check-jsonschema, every action) are
+themselves kept current by this repository's Dependabot.
 
 ## Using it
 
-Always pin by commit SHA, with the release tag as a comment:
-
 ```yaml
-- uses: KN990x/.github/actions/validate-config@<sha> # v1.0.0
+- uses: KN990x/.github/actions/validate-config@<sha> # vX.Y.Z
 ```
 
 ```yaml
+# .github/workflows/dependabot-merge.yml in a repository
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: ["dependabot/**"]
 jobs:
-  publish:
+  merge:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPENDABOT_AUTOMERGE != 'off' }}
     permissions:
       contents: write
-      packages: write
-      actions: read
-    uses: KN990x/.github/.github/workflows/ghcr-publish.yml@<sha> # v1.0.0
-    with:
-      image: ghcr.io/kn990x/<name>
-      tag: ${{ github.event.release.tag_name || inputs.tag }}
-      push: ${{ github.event_name == 'release' || inputs.push == true }}
+      pull-requests: write
+      actions: write
+    uses: KN990x/.github/.github/workflows/dependabot-merge.yml@<sha> # vX.Y.Z
 ```
 
-Dependabot updates the pin in each repository when a new release of this one is tagged.
-
-## Changing it
-
-1. Change and push here. CI runs the new `validate-config` against this repository itself.
-2. Tag a release (`vX.Y.Z`; a breaking input change is a new major).
-3. The repositories pick it up in their monthly Dependabot `actions` PR, or bump the SHA by
-   hand when it cannot wait.
+To stop automatic merges in one repository, set its Actions variable
+`DEPENDABOT_AUTOMERGE` to `off`; for a single PR, label it `no-automerge`.
 
 ## License
 

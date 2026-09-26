@@ -1,9 +1,9 @@
 # Same policy as the repositories that use this one: monthly, grouped, a 7-day cooldown, and
-# security updates in their own group.
+# security updates in their own group. Three things to keep current here: the actions the
+# workflows use, the actionlint image, and check-jsonschema. The test fixtures are
+# deliberately NOT watched: test/majors must stay stale for its test to mean anything.
 version: 2
 updates:
-  # Covers the reusable workflows. The composite actions call no other action, so there is
-  # nothing to update under actions/.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -19,6 +19,54 @@ updates:
         patterns:
           - "*"
       actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+
+  # The actionlint image (actions/validate-config/Dockerfile) and the fixture's busybox.
+  - package-ecosystem: "docker"
+    directories:
+      - "/actions/validate-config"
+      - "/test/fixture"
+    schedule:
+      interval: "monthly"
+      time: "06:00"
+      timezone: "Europe/Madrid"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      docker-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      docker:
+        applies-to: version-updates
+        patterns:
+          - "*"
+
+  # check-jsonschema (actions/validate-config/requirements.txt).
+  - package-ecosystem: "pip"
+    directory: "/actions/validate-config"
+    schedule:
+      interval: "monthly"
+      time: "06:00"
+      timezone: "Europe/Madrid"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      python:
         applies-to: version-updates
         patterns:
           - "*"

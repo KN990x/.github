@@ -1,33 +1,25 @@
 name: Validate workflows and Dependabot config
 description: >-
-  Lints .github/workflows with actionlint (and shellcheck, which the runner ships) and checks
-  .github/dependabot.yml against its schema. The one file whose breakage is silent: an
-  invalid dependabot.yml disables Dependabot entirely, with no error anywhere.
+  Lints .github/workflows with actionlint (and shellcheck) and checks .github/dependabot.yml
+  against its schema. The one file whose breakage is silent: an invalid dependabot.yml
+  disables Dependabot entirely, with no error anywhere.
 
 runs:
   using: composite
   steps:
     - name: actionlint and the Dependabot schema
       shell: bash
-      env:
-        # Pinned, and the tarball checked against its published digest: the gate must not
-        # change under a commit that changed nothing.
-        ACTIONLINT_VERSION: "1.7.12"
-        ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
-        CHECK_JSONSCHEMA_VERSION: "0.38.0"
       run: |
         set -euo pipefail
-        tmp="$(mktemp -d)"
-        trap 'rm -rf "$tmp"' EXIT
-
-        curl -sSfL -o "$tmp/actionlint.tar.gz" \
-          "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-        echo "${ACTIONLINT_SHA256}  $tmp/actionlint.tar.gz" | sha256sum --check --quiet
-        tar xzf "$tmp/actionlint.tar.gz" -C "$tmp" actionlint
-        "$tmp/actionlint" -color .github/workflows/*.yml
+        # Both tool versions live next to this file (Dockerfile, requirements.txt), where
+        # Dependabot updates them; nothing to bump by hand here.
+        image="$(sed -n 's/^FROM[[:space:]]\{1,\}//p' "$GITHUB_ACTION_PATH/Dockerfile" | head -n 1)"
+        docker run --rm -v "$PWD:/repo:ro" -w /repo "$image" -color .github/workflows/*.yml
 
         # Its own venv, so nothing leaks into the Python the job sets up afterwards.
-        python3 -m venv "$tmp/venv"
-        "$tmp/venv/bin/pip" install --quiet "check-jsonschema==${CHECK_JSONSCHEMA_VERSION}"
-        "$tmp/venv/bin/check-jsonschema" \
+        venv="$(mktemp -d)"
+        python3 -m venv "$venv"
+        "$venv/bin/pip" install --quiet -r "$GITHUB_ACTION_PATH/requirements.txt"
+        "$venv/bin/check-jsonschema" \
           --schemafile https://json.schemastore.org/dependabot-2.0.json .github/dependabot.yml
+        rm -rf "$venv"

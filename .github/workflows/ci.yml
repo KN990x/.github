@@ -1,3 +1,7 @@
+# Everything a repository will rely on is exercised here first, against fixtures, before a
+# release makes it available: the config check on this repository itself, the majors report
+# on a deliberately stale project, and the whole release pipeline on a tiny image in both
+# architectures. Green on main tags the next release automatically.
 name: CI
 
 on:
@@ -24,18 +28,120 @@ jobs:
         with:
           persist-credentials: false
 
-      # The same check every repository runs, taken from this tree: a change here is
-      # validated by its own action before any repository pins it.
+      # The same check every repository runs, taken from this tree.
       - name: Validate workflows and Dependabot config
         uses: ./actions/validate-config
+
+      - name: The actionlint image ships shellcheck
+        run: |
+          image="$(sed -n 's/^FROM[[:space:]]\{1,\}//p' actions/validate-config/Dockerfile | head -n 1)"
+          docker run --rm --entrypoint shellcheck "$image" --version
 
       - name: Validate the composite actions
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install --quiet "check-jsonschema==0.38.0"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet -r actions/validate-config/requirements.txt
           "$RUNNER_TEMP/venv/bin/check-jsonschema" \
             --schemafile https://json.schemastore.org/github-action.json actions/*/action.yml
 
       - name: shellcheck the scripts
-        run: shellcheck actions/*/*.sh
+        run: shellcheck actions/*/*.sh test/*/*.sh
+
+  majors-fixture:
+    name: Majors report on a stale project
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: test/majors/package.json
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Install the fixture
+        working-directory: test/majors
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Dry run: prints the issue body instead of writing it. Each assertion is one section
+      # of the report working end to end.
+      - name: Report and assert
+        env:
+          DRY_RUN: "1"
+          PNPM_DIRS: test/majors
+          RUNTIME_ROOT: test/majors
+          HELD: is-odd
+        run: |
+          set -euo pipefail
+          bash actions/majors-report/majors-report.sh > "$RUNNER_TEMP/report.md"
+          cat "$RUNNER_TEMP/report.md"
+          grep -q '^| `is-number` | 6.0.0 |' "$RUNNER_TEMP/report.md"
+          sed -n '/## Held back/,$p' "$RUNNER_TEMP/report.md" | grep -q '^| `is-odd` | 2.0.0 |'
+          ! sed -n '/## New majors/,/## Held back/p' "$RUNNER_TEMP/report.md" | grep -q '`is-odd`'
+          grep -q '^| node | .nvmrc | 22 | \*\*' "$RUNNER_TEMP/report.md"
+
+  publish-fixture:
+    name: Release pipeline on a tiny image
+    permissions:
+      contents: read
+      packages: write # requested by the pipeline; nothing is pushed here
+      actions: read
+    uses: ./.github/workflows/ghcr-publish.yml
+    with:
+      image: ghcr.io/kn990x/pipeline-fixture
+      context: test/fixture
+      smoke-script: test/fixture/smoke-test.sh
+      require-ci: false
+
+  # Green on main tags the next release: a patch by default, `#minor` or `#major` anywhere in
+  # the commit messages since the last tag for more. The repositories pick it up in their
+  # monthly Dependabot `actions` PR, which merges itself once their CI passes.
+  release:
+    name: Tag the next release
+    needs: [ci, majors-fixture, publish-fixture]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Tag and release
+        run: |
+          set -euo pipefail
+          if git tag --points-at HEAD | grep -q '^v'; then
+            echo "HEAD is already released."
+            exit 0
+          fi
+          last="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          last="${last:-v0.0.0}"
+          # A change to the README or the license alone is not worth a release.
+          if [ -z "$(git diff --name-only "$last" HEAD -- . ':!README.md' ':!LICENSE')" ]; then
+            echo "Only documentation changed since ${last}."
+            exit 0
+          fi
+          messages="$(git log --format=%B "${last}..HEAD")"
+          IFS=. read -r major minor patch <<< "${last#v}"
+          if grep -q '#major' <<< "$messages"; then
+            major=$((major + 1)); minor=0; patch=0
+          elif grep -q '#minor' <<< "$messages"; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          next="v${major}.${minor}.${patch}"
+          gh release create "$next" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$next" --generate-notes
+          echo "Released ${next}."

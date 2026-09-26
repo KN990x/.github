@@ -1,0 +1,9 @@
+{
+  "name": "majors-fixture",
+  "private": true,
+  "packageManager": "pnpm@10.34.5",
+  "dependencies": {
+    "is-number": "6.0.0",
+    "is-odd": "2.0.0"
+  }
+}
