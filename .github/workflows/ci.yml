@@ -48,6 +48,19 @@ jobs:
       - name: shellcheck the scripts
         run: shellcheck actions/*/*.sh test/*/*.sh
 
+  automerge-rules:
+    name: Automerge rules on canned cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Every rule dependabot-merge.yml enforces, including "no approval, no merge".
+      - name: Run the cases
+        run: python3 test/automerge/run.py
+
   majors-fixture:
     name: Majors report on a stale project
     runs-on: ubuntu-latest
@@ -114,7 +127,7 @@ jobs:
   # monthly Dependabot `actions` PR, which merges itself once their CI passes.
   release:
     name: Tag the next release
-    needs: [ci, majors-fixture, publish-fixture]
+    needs: [ci, automerge-rules, majors-fixture, publish-fixture]
     # A push, or the run dispatched after an automatic Dependabot merge.
     if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest

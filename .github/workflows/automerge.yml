@@ -1,5 +1,5 @@
 # This repository's own Dependabot PRs (actions, the actionlint image, check-jsonschema)
-# merge themselves like everyone else's, through the workflow they will all use.
+# follow the same rule as everyone else's: green CI AND an approval on the current head.
 name: Dependabot automerge
 
 on:
@@ -7,14 +7,26 @@ on:
     workflows: [CI]
     types: [completed]
     branches: ["dependabot/**"]
+  pull_request_review:
+    types: [submitted]
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
 jobs:
   merge:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPENDABOT_AUTOMERGE != 'off' }}
+    if: >-
+      ${{ vars.DEPENDABOT_AUTOMERGE != 'off' && (
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+        (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' &&
+         startsWith(github.event.pull_request.head.ref, 'dependabot/'))) }}
     permissions:
       contents: write
       pull-requests: write
       actions: write
     uses: ./.github/workflows/dependabot-merge.yml
+    with:
+      approvers: ${{ vars.AUTOMERGE_APPROVERS }}

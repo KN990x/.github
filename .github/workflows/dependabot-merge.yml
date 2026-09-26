@@ -1,14 +1,23 @@
-# Reusable: merges a Dependabot PR once its CI has passed, if and only if it is routine.
-# Each repository calls it from a `workflow_run` of its CI, so it runs after the check it
-# relies on, on the default branch, and never executes the PR's code — it only reads the PR
-# through the API.
+# Reusable: merges a Dependabot PR once it has BOTH a green CI run and an approval from an
+# authorised reviewer (Timón, or KN) on its current head commit — and only if it is routine.
+# The reviewer's judgement can only make this stricter: an approval never overrides the
+# fixed rules below, so a misleading changelog cannot talk its way into a merge.
 #
-# Merged only when ALL of these hold; anything else is left for a human (or Timón):
+# Each repository calls it from two events, so the order does not matter:
+#   - `workflow_run` of its CI (approval came first, CI finishes after);
+#   - `pull_request_review` (CI was already green, approval arrives after).
+# It never executes the PR's code: it only reads the PR through the API.
+#
+# Merged only when ALL of these hold:
 #   - opened by dependabot[bot], every commit on it by dependabot[bot], from this repository;
-#   - the CI run that triggered this is for the PR's current head (nothing pushed since);
-#   - no major in Dependabot's own update metadata. A security major is left alone too;
-#   - only dependency files change: manifests and lockfiles; in Dockerfiles, only FROM or
-#     COPY --from lines; in workflows, only `uses:` lines;
+#   - the CI workflow has a successful run on the PR's current head;
+#   - the latest review of an authorised reviewer on that exact head is an approval (a
+#     rebase invalidates it: the new head needs a new review), and none of them has asked
+#     for changes since;
+#   - no major in Dependabot's own update metadata (majors go through a human, or through
+#     Timón's own PR, never through this);
+#   - only dependency files change: manifests and lockfiles; in Dockerfiles only FROM or
+#     COPY --from lines; in workflows only `uses:` lines;
 #   - not labelled `no-automerge`, and GitHub reports it mergeable.
 #
 # A merge made with GITHUB_TOKEN starts no push workflows, so CI is dispatched on the
@@ -19,15 +28,19 @@ on:
   workflow_call:
     inputs:
       ci-workflow:
-        description: CI workflow file to dispatch on the default branch after merging.
+        description: CI workflow file whose green run is required, and which is dispatched on the default branch after merging.
         type: string
         default: ci.yml
+      approvers:
+        description: Space-separated GitHub logins whose approval counts. Defaults to the repository owner.
+        type: string
+        default: ""
 
 permissions: {}
 
 jobs:
   merge:
-    name: Merge if routine
+    name: Merge if approved and routine
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -39,19 +52,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          EVENT_NAME: ${{ github.event_name }}
+          # workflow_run
           RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+          # pull_request_review
+          REVIEW_PR: ${{ github.event.pull_request.number }}
           CI_WORKFLOW: ${{ inputs.ci-workflow }}
+          APPROVERS: ${{ inputs.approvers }}
         run: |
           python3 - <<'PY'
+          # --- decision (tested in this repository's CI against canned API answers) ---
           import json, os, re, subprocess, sys, time
 
-          repo = os.environ["REPO"]
-          head_sha = os.environ["HEAD_SHA"]
-          summary = open(os.environ["GITHUB_STEP_SUMMARY"], "a")
+          env = os.environ
+          repo = env["REPO"]
+          approvers = set((env.get("APPROVERS") or env["OWNER"]).split())
+          summary = open(env.get("GITHUB_STEP_SUMMARY") or os.devnull, "a")
 
           def gh(*args):
               return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
@@ -64,24 +83,43 @@ jobs:
               summary.write(message + "\n")
               sys.exit(0)
 
-          if os.environ["RUN_EVENT"] != "pull_request" or os.environ["RUN_CONCLUSION"] != "success":
-              done("Not a successful pull_request CI run: nothing to do.")
-          prs = json.loads(os.environ["RUN_PRS"] or "[]")
-          if len(prs) != 1:
-              done(f"The CI run belongs to {len(prs)} pull requests: left alone.")
-          number = prs[0]["number"]
+          if env["EVENT_NAME"] == "workflow_run":
+              if env.get("RUN_CONCLUSION") != "success":
+                  done("CI did not pass: nothing to merge.")
+              prs = json.loads(env.get("RUN_PRS") or "[]")
+              if len(prs) != 1:
+                  done(f"The CI run belongs to {len(prs)} pull requests: left alone.")
+              number = prs[0]["number"]
+          elif env["EVENT_NAME"] == "pull_request_review":
+              number = int(env["REVIEW_PR"])
+          else:
+              done(f"Unexpected event {env['EVENT_NAME']}.")
 
           pr = api(f"repos/{repo}/pulls/{number}")
+          head = pr["head"]["sha"]
           if pr["state"] != "open":
               done(f"#{number} is not open.")
           if pr["user"]["login"] != "dependabot[bot]":
               done(f"#{number} was not opened by Dependabot.")
           if pr["head"]["repo"]["full_name"] != repo:
               done(f"#{number} comes from another repository.")
-          if pr["head"]["sha"] != head_sha:
-              done(f"#{number} moved on since this CI run; the run for its new head decides.")
           if any(label["name"] == "no-automerge" for label in pr["labels"]):
               done(f"#{number} is labelled no-automerge.")
+
+          runs = api(f"repos/{repo}/actions/workflows/{env['CI_WORKFLOW']}/runs?head_sha={head}&status=success&per_page=1")
+          if runs["total_count"] == 0:
+              done(f"#{number}: no green {env['CI_WORKFLOW']} run on {head[:7]} yet.")
+
+          # The latest review of each authorised reviewer on the current head decides.
+          latest = {}
+          for review in api(f"repos/{repo}/pulls/{number}/reviews?per_page=100"):
+              login = (review.get("user") or {}).get("login")
+              if login in approvers and review["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+                  latest[login] = review
+          if any(r["state"] == "CHANGES_REQUESTED" for r in latest.values()):
+              done(f"#{number}: a reviewer asked for changes.")
+          if not any(r["state"] == "APPROVED" and r["commit_id"] == head for r in latest.values()):
+              done(f"#{number}: waiting for an approval on {head[:7]} from {', '.join(sorted(approvers))}.")
 
           commits = api(f"repos/{repo}/pulls/{number}/commits?per_page=100")
           if any((c.get("author") or {}).get("login") != "dependabot[bot]" for c in commits):
@@ -89,10 +127,8 @@ jobs:
           metadata = "\n".join(c["commit"]["message"] for c in commits)
           update_types = set(re.findall(r"update-type:\s*version-update:semver-(\w+)", metadata))
           if "major" in update_types:
-              done(f"#{number} includes a major update: a human decides.")
+              done(f"#{number} includes a major update: it goes through a human or Timón's own PR.")
 
-          # Dependency files only. For Dockerfiles and workflows, every changed line must be
-          # a base-image or `uses:` line: anything else is not a dependency bump.
           plain = {"package.json", "pnpm-lock.yaml", "pyproject.toml", "requirements.txt"}
           files = api(f"repos/{repo}/pulls/{number}/files?per_page=100")
           for f in files:
@@ -118,15 +154,14 @@ jobs:
               pr = api(f"repos/{repo}/pulls/{number}")
               if pr["mergeable"] is not None:
                   break
-              time.sleep(10)
+              time.sleep(int(env.get("MERGEABLE_WAIT", "10")))
           if pr["mergeable"] is not True:
               done(f"#{number} is not mergeable ({pr['mergeable_state']}).")
 
           gh("pr", "merge", str(number), "--repo", repo, "--merge", "--delete-branch",
-             "--match-head-commit", head_sha)
-          gh("workflow", "run", os.environ["CI_WORKFLOW"], "--repo", repo,
-             "--ref", os.environ["DEFAULT_BRANCH"])
+             "--match-head-commit", head)
+          gh("workflow", "run", env["CI_WORKFLOW"], "--repo", repo, "--ref", env["DEFAULT_BRANCH"])
           kinds = ", ".join(sorted(update_types)) or "digest"
-          done(f"Merged #{number} ({pr['title']}; {kinds}) and dispatched "
-               f"{os.environ['CI_WORKFLOW']} on {os.environ['DEFAULT_BRANCH']}.")
+          done(f"Merged #{number} ({pr['title']}; {kinds}), approved on {head[:7]}, "
+               f"and dispatched {env['CI_WORKFLOW']} on {env['DEFAULT_BRANCH']}.")
           PY
