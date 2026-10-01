@@ -1,2 +1,2 @@
 # Kept here, not inline in action.yml, so Dependabot's pip updates can move it.
-check-jsonschema==0.38.0
+check-jsonschema==0.38.2
