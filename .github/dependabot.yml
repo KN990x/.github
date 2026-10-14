@@ -2,6 +2,11 @@
 # security updates in their own group. Three things to keep current here: the actions the
 # workflows use, the actionlint image, and check-jsonschema. The test fixtures are
 # deliberately NOT watched: test/majors must stay stale for its test to mean anything.
+#
+# One difference on purpose: majors are NOT ignored here. The repositories ignore them because
+# their monthly majors report lists them in an issue; nothing reports on this repository, so an
+# ignored major of the actionlint image or check-jsonschema would never be seen. They arrive
+# as PRs, and dependabot-merge never merges a major on its own.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -35,9 +40,6 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     groups:
       docker-security:
         applies-to: security-updates
@@ -58,9 +60,6 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     groups:
       python-security:
         applies-to: security-updates

@@ -74,9 +74,11 @@ jobs:
         with:
           package_json_file: test/majors/package.json
 
+      # Only runs pnpm for the fixture, whose own .nvmrc is stale on purpose: any current LTS
+      # does, and "lts/*" keeps this from becoming the next thing to bump.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version: "lts/*"
 
       - name: Install the fixture
         working-directory: test/majors
@@ -124,7 +126,8 @@ jobs:
 
   # Green on main tags the next release: a patch by default, `#minor` or `#major` anywhere in
   # the commit messages since the last tag for more. The repositories pick it up in their
-  # monthly Dependabot `actions` PR, which merges itself once their CI passes.
+  # monthly Dependabot `actions` PR, which merges once their CI passes AND an authorised
+  # reviewer approved it (dependabot-merge.yml).
   release:
     name: Tag the next release
     needs: [ci, automerge-rules, majors-fixture, publish-fixture]
@@ -151,9 +154,13 @@ jobs:
           fi
           last="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
           last="${last:-v0.0.0}"
-          # A change to the README or the license alone is not worth a release.
-          if [ -z "$(git diff --name-only "$last" HEAD -- . ':!README.md' ':!LICENSE')" ]; then
-            echo "Only documentation changed since ${last}."
+          # Only what the repositories actually consume is worth a release: every release
+          # moves a pin in each of them. Tests, fixtures, this repository's own workflows and
+          # Dependabot config, and the community health files never reach a caller (v1.2.1
+          # was a release for a fixture-only change).
+          if [ -z "$(git diff --name-only "$last" HEAD -- actions \
+                     .github/workflows/ghcr-publish.yml .github/workflows/dependabot-merge.yml)" ]; then
+            echo "Nothing the repositories use changed since ${last}."
             exit 0
           fi
           messages="$(git log --format=%B "${last}..HEAD")"
