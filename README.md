@@ -84,4 +84,4 @@ To stop automatic merges in one repository, set its Actions variable
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)
