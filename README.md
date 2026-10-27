@@ -24,7 +24,8 @@ repository (see [Community defaults](#community-defaults)).
    commit message for more (a major is for a breaking input change).
 3. Each repository pins a release by SHA (`@<sha> # vX.Y.Z`). Its monthly Dependabot
    `actions` PR moves the pin — without the usual 7-day cooldown, which exists for third
-   parties — its CI tests the new version, Timón reviews it, and `dependabot-merge` merges it.
+   parties — its CI tests the new version, an authorised reviewer approves it, and `dependabot-merge`
+   merges it.
 
 The tool versions used here (the actionlint image, check-jsonschema, every action) are
 themselves kept current by this repository's Dependabot. Unlike in the repositories, their
@@ -76,7 +77,7 @@ jobs:
 
 A Dependabot PR merges when it has a green CI run **and** an approving review on its
 current head from an authorised reviewer (`AUTOMERGE_APPROVERS`, default the repository
-owner — Timón reviews with it). The approval never overrides the fixed rules (no majors,
+owner). The approval never overrides the fixed rules (no majors,
 dependency files only, nothing pushed on top); a rebase needs a new approval.
 
 To stop automatic merges in one repository, set its Actions variable
