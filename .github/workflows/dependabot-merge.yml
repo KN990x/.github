@@ -1,5 +1,6 @@
 # Reusable: merges a Dependabot PR once it has BOTH a green CI run and an approval from an
-# authorised reviewer (Timón, or KN) on its current head commit — and only if it is routine.
+# authorised reviewer (AUTOMERGE_APPROVERS, the owner by default) on its current head commit —
+# and only if it is routine.
 # The reviewer's judgement can only make this stricter: an approval never overrides the
 # fixed rules below, so a misleading changelog cannot talk its way into a merge.
 #
@@ -14,8 +15,8 @@
 #   - the latest review of an authorised reviewer on that exact head is an approval (a
 #     rebase invalidates it: the new head needs a new review), and none of them has asked
 #     for changes since;
-#   - no major in Dependabot's own update metadata (majors go through a human, or through
-#     Timón's own PR, never through this);
+#   - no major in Dependabot's own update metadata (majors go through a human, never
+#     through this);
 #   - only dependency files change: manifests and lockfiles; in Dockerfiles only FROM or
 #     COPY --from lines; in workflows only `uses:` lines;
 #   - not labelled `no-automerge`, and GitHub reports it mergeable.
@@ -127,7 +128,7 @@ jobs:
           metadata = "\n".join(c["commit"]["message"] for c in commits)
           update_types = set(re.findall(r"update-type:\s*version-update:semver-(\w+)", metadata))
           if "major" in update_types:
-              done(f"#{number} includes a major update: it goes through a human or Timón's own PR.")
+              done(f"#{number} includes a major update: it goes through a human.")
 
           plain = {"package.json", "pnpm-lock.yaml", "pyproject.toml", "requirements.txt"}
           files = api(f"repos/{repo}/pulls/{number}/files?per_page=100")
