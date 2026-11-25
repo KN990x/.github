@@ -1,4 +1,4 @@
-# Monthly check of every public KN990x repository that uses Dependabot, in one place, so
+# Monthly check of every public KN990x repository with a CI, in one place, so
 # nobody has to open five repositories to know they are healthy. It rewrites a single issue
 # here, "Fleet status" (label `fleet`), which is edited in place and so sends no
 # notification. Read-only everywhere else: it only uses public data.
@@ -6,8 +6,7 @@ name: Fleet check
 
 on:
   schedule:
-    # The 1st, 12:00 UTC: after the audits (03:30), the release dry runs (04:30),
-    # Dependabot (06:00 Madrid) and the morning's automatic merges.
+    # The 1st, 12:00 UTC: after the audits (03:30) and the release dry runs (04:30).
     - cron: "0 12 1 * *"
   workflow_dispatch:
 
@@ -63,11 +62,11 @@ jobs:
                    if not r["private"] and not r["archived"]]
           for r in sorted(repos, key=lambda r: r["name"].lower()):
               name, full = r["name"], r["full_name"]
-              if api(f"repos/{full}/contents/.github/dependabot.yml") is None:
-                  continue
               branch = r["default_branch"]
               workflows = (api(f"repos/{full}/actions/workflows?per_page=100") or {}).get("workflows", [])
               files = {w["path"].rsplit("/", 1)[-1]: w for w in workflows if w["path"].startswith(".github/")}
+              if "ci.yml" not in files:
+                  continue
               disabled = [w["name"] for w in workflows if w["state"] != "active"]
 
               # Which release of this repository the others pin.
@@ -81,17 +80,10 @@ jobs:
               if pins and pins != {latest}:
                   pin = f"**{pin}**"
 
-              prs = api(f"repos/{full}/pulls?state=open&per_page=100") or []
-              bot = [p for p in prs if p["user"]["login"] == "dependabot[bot]"]
-              oldest = max(((now - datetime.datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))).days for p in bot), default=0)
-              prs_cell = f"{len(bot)}" + (f" (oldest {oldest} d)" if bot else "")
-              if oldest > 14:
-                  prs_cell = f"**{prs_cell}**"
-
               ci = last_run(full, "ci.yml", branch)
               audit = last_run(full, "security-audit.yml") if "security-audit.yml" in files else "—"
               release = last_run(full, "ghcr-publish.yml") if "ghcr-publish.yml" in files else "—"
-              row = [f"[{name}]({r['html_url']})", ci, audit, release, pin, prs_cell,
+              row = [f"[{name}]({r['html_url']})", ci, audit, release, pin,
                      ", ".join(f"**{d}**" for d in disabled) or "none"]
               rows.append("| " + " | ".join(row) + " |")
               if "**" in "".join(row[1:]):
@@ -99,13 +91,13 @@ jobs:
 
           body = [
               "Rewritten every month by the `Fleet check` workflow (and on demand). Bold means",
-              "something to look at: a failed run, an old pin, a Dependabot PR open for more than",
-              "14 days, or a workflow GitHub disabled for inactivity.",
+              "something to look at: a failed run, an old pin, or a workflow GitHub disabled for",
+              "inactivity.",
               "",
               f"Latest shared release: **{latest}**.",
               "",
-              "| Repository | CI on main | Security audit | Release → GHCR | Shared pin | Dependabot PRs | Disabled workflows |",
-              "| --- | --- | --- | --- | --- | --- | --- |",
+              "| Repository | CI on main | Security audit | Release → GHCR | Shared pin | Disabled workflows |",
+              "| --- | --- | --- | --- | --- | --- |",
               *rows,
               "",
               ("**Needs a look:** " + ", ".join(problems)) if problems else "Everything is healthy.",

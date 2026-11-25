@@ -1,7 +1,7 @@
 # Everything a repository will rely on is exercised here first, against fixtures, before a
-# release makes it available: the config check on this repository itself, the majors report
-# on a deliberately stale project, and the whole release pipeline on a tiny image in both
-# architectures. Green on main tags the next release automatically.
+# release makes it available: the workflow check on this repository itself and the whole
+# release pipeline on a tiny image in both architectures. Green on main tags the next release
+# automatically.
 name: CI
 
 on:
@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       # The same check every repository runs, taken from this tree.
-      - name: Validate workflows and Dependabot config
+      - name: Validate workflows
         uses: ./actions/validate-config
 
       - name: The actionlint image ships shellcheck
@@ -46,68 +46,7 @@ jobs:
             --schemafile https://json.schemastore.org/github-action.json actions/*/action.yml
 
       - name: shellcheck the scripts
-        run: shellcheck actions/*/*.sh test/*/*.sh
-
-  automerge-rules:
-    name: Automerge rules on canned cases
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Every rule dependabot-merge.yml enforces, including "no approval, no merge".
-      - name: Run the cases
-        run: python3 test/automerge/run.py
-
-  majors-fixture:
-    name: Majors report on a stale project
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: test/majors/package.json
-
-      # Only runs pnpm for the fixture, whose own .nvmrc is stale on purpose: any current LTS
-      # does, and "lts/*" keeps this from becoming the next thing to bump.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "lts/*"
-
-      - name: Install the fixture
-        working-directory: test/majors
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      # Dry run: prints the issue body instead of writing it. Each assertion is one section
-      # of the report working end to end.
-      - name: Report and assert
-        env:
-          DRY_RUN: "1"
-          PNPM_DIRS: test/majors
-          RUNTIME_ROOT: test/majors
-          HELD: is-odd
-        run: |
-          set -euo pipefail
-          bash actions/majors-report/majors-report.sh > "$RUNNER_TEMP/report.md"
-          cat "$RUNNER_TEMP/report.md"
-          python3 - "$RUNNER_TEMP/report.md" <<'PY'
-          import sys
-          report = open(sys.argv[1]).read()
-          majors = report.split("## New majors available")[1].split("## Held back")[0]
-          held = report.split("## Held back")[1].split("## Runtimes")[0]
-          runtimes = report.split("## Runtimes")[1]
-          assert "| `is-number` | 6.0.0 |" in majors, "is-number missing from the new majors"
-          assert "`is-odd`" not in majors, "a held package leaked into the new majors"
-          assert "| `is-odd` | 2.0.0 |" in held, "is-odd missing from the held section"
-          assert "| node | .nvmrc | 22 | **" in runtimes, "Node 22 not flagged as behind"
-          print("All four sections of the report behave.")
-          PY
+        run: shellcheck test/*/*.sh
 
   publish-fixture:
     name: Release pipeline on a tiny image
@@ -125,13 +64,12 @@ jobs:
       require-ci: false
 
   # Green on main tags the next release: a patch by default, `#minor` or `#major` anywhere in
-  # the commit messages since the last tag for more. The repositories pick it up in their
-  # monthly Dependabot `actions` PR, which merges once their CI passes AND an authorised
-  # reviewer approved it (dependabot-merge.yml).
+  # the commit messages since the last tag for more. The repositories move their pin when
+  # their dependencies are updated, and their own CI tests the new version.
   release:
     name: Tag the next release
-    needs: [ci, automerge-rules, majors-fixture, publish-fixture]
-    # A push, or the run dispatched after an automatic Dependabot merge.
+    needs: [ci, publish-fixture]
+    # A push to main or a manual run on it.
     if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -156,10 +94,10 @@ jobs:
           last="${last:-v0.0.0}"
           # Only what the repositories actually consume is worth a release: every release
           # moves a pin in each of them. Tests, fixtures, this repository's own workflows and
-          # Dependabot config, and the community health files never reach a caller (v1.2.1
+          # the community health files never reach a caller (v1.2.1
           # was a release for a fixture-only change).
           if [ -z "$(git diff --name-only "$last" HEAD -- actions \
-                     .github/workflows/ghcr-publish.yml .github/workflows/dependabot-merge.yml)" ]; then
+                     .github/workflows/ghcr-publish.yml)" ]; then
             echo "Nothing the repositories use changed since ${last}."
             exit 0
           fi

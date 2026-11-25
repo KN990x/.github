@@ -28,7 +28,7 @@ layout and checks.
 - Secrets, real tokens, personal emails, or homelab hostnames and IPs — not even in tests
   or examples. Use placeholders such as `example.com`.
 - Unrelated refactors or formatting changes mixed into a fix.
-- Changes to dependency versions on their own: Dependabot handles those.
+- Changes to dependency versions on their own: the maintainer keeps those current.
 
 ## Licence
 
