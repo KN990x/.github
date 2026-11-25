@@ -9,7 +9,6 @@ repository (see [Community defaults](#community-defaults)).
 | --- | --- | --- |
 | [`actions/validate-config`](actions/validate-config/action.yml) | Composite action | First step of every `ci.yml`: actionlint (with shellcheck) on the workflows. |
 | [`ghcr-publish.yml`](.github/workflows/ghcr-publish.yml) | Reusable workflow | Release → GHCR: tag/version check, CI-passed check, amd64 + arm64 smoke tests, multi-arch push with provenance and SBOM, release assets. `push: false` is the monthly dry run. |
-| [`fleet-check.yml`](.github/workflows/fleet-check.yml) | Scheduled here | Monthly "Fleet status" issue in this repository: CI, audit, release dry run, shared pin and disabled workflows for every public repository with a CI. |
 
 ## How a change reaches the repositories
 
